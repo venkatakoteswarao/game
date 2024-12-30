@@ -1,2 +1,5 @@
-fastapi==0.95.2
-uvicorn==0.22.0
+fastapi
+uvicorn
+websockets
+python-multipart
+aiofiles
