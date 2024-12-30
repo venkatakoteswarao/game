@@ -12,7 +12,7 @@ app = FastAPI()
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace "*" with specific domains in production
+    allow_origins=[""],  # Replace "" with specific domains in production
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -34,7 +34,7 @@ game_state = {
 }
 
 # Path to word list file
-WORD_FILE_PATH = os.path.join(os.path.dirname(__file__), "word_list.txt")
+WORD_FILE_PATH = os.path.join(os.path.dirname(_file_), "word_list.txt")
 
 # Load words
 def load_words(file_path):
@@ -53,6 +53,7 @@ async def broadcast_message(message: str):
         try:
             await connection.send_text(message)
         except Exception:
+            logging.error("Error sending message, removing connection.")
             active_connections.remove(connection)
 
 # Timer logic
@@ -62,6 +63,17 @@ async def start_timer():
         game_state["time_left"] -= 1
         await broadcast_message(f"Time left: {game_state['time_left']} seconds")
     await broadcast_message("Time is up!")
+
+# Reset game state
+def reset_game():
+    game_state.update({
+        "word_to_guess": "",
+        "guessed_players": [],
+        "scores": {},
+        "used_words": set(),
+        "time_left": 60,
+        "passcode": None,
+    })
 
 # Root endpoint
 @app.get("/")
@@ -87,20 +99,56 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 # Process actions
                 if action == "create_game":
-                    # Logic for creating the game
-                    ...
+                    host_name = message["host_name"]
+                    passcode = message["passcode"]
+                    reset_game()
+                    game_state["word_to_guess"] = random.choice(word_list)
+                    game_state["scores"] = {host_name: 0}
+                    game_state["passcode"] = passcode
+                    await websocket.send_text(f"Game created! Passcode: {passcode}")
+
                 elif action == "join_game":
-                    # Logic for joining the game
-                    ...
+                    player_name = message["player_name"]
+                    passcode = message["passcode"]
+                    if passcode != game_state["passcode"]:
+                        await websocket.send_text("Invalid passcode!")
+                    else:
+                        game_state["scores"][player_name] = 0
+                        await websocket.send_text(f"Welcome {player_name}! Your score is 0.")
+                        await broadcast_message(f"{player_name} joined the game!")
+
                 elif action == "start_game":
-                    asyncio.create_task(start_timer())
-                    ...
+                    if not game_state["word_to_guess"]:
+                        await websocket.send_text("No word set for the game. Create the game first!")
+                    else:
+                        asyncio.create_task(start_timer())
+                        await broadcast_message(
+                            f"Game started! Word to guess: {'_ ' * len(game_state['word_to_guess'])}"
+                        )
+
                 elif action == "guess_word":
-                    # Logic for guessing words
-                    ...
+                    player_name = message["player_name"]
+                    guess = message["guess"]
+                    if guess.upper() == game_state["word_to_guess"].upper():
+                        game_state["scores"][player_name] += 10
+                        game_state["guessed_players"].append(player_name)
+                        await broadcast_message(f"{player_name} guessed the word! The word was {game_state['word_to_guess']}")
+                        next_word = random.choice(
+                            [w for w in word_list if w not in game_state["used_words"]]
+                        )
+                        game_state["used_words"].add(next_word)
+                        game_state["word_to_guess"] = next_word
+                        await broadcast_message(f"Next word: {'_ ' * len(next_word)}")
+                    else:
+                        await websocket.send_text("Incorrect guess, try again!")
+
                 elif action == "leaderboard":
-                    # Logic for leaderboard
-                    ...
+                    leaderboard = sorted(game_state["scores"].items(), key=lambda x: x[1], reverse=True)
+                    await websocket.send_text(json.dumps({"leaderboard": leaderboard}))
+
+                else:
+                    await websocket.send_text("Unknown action.")
+
             except json.JSONDecodeError:
                 await websocket.send_text("Invalid JSON format.")
     except WebSocketDisconnect:
@@ -113,4 +161,3 @@ async def shutdown():
     for connection in active_connections:
         await connection.close()
     active_connections.clear()
-
