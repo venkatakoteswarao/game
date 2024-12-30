@@ -34,7 +34,7 @@ game_state = {
 }
 
 # Path to word list file
-WORD_FILE_PATH = os.path.join(os.path.dirname(_file_), "word_list.txt")
+WORD_FILE_PATH = os.path.join(os.path.dirname(__file__), "word_list.txt")
 
 # Load words
 def load_words(file_path):
